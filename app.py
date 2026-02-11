@@ -93,3 +93,4 @@ if show_real_data:
         st.error("Error loading data. Please ensure 'btcusd_1-min_data.csv.crdownload' is in the same folder.")
 
 st.markdown("---")
+
