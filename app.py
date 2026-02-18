@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import google.generativeai as genai
+import os
 from datetime import datetime, timedelta
 
 # 1. PAGE CONFIG
@@ -113,9 +114,11 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # --- STAGE 4: DATA PREPARATION (FILE UPLOADER) ---
-    st.subheader("📂 Assignment Data")
-    uploaded_file = st.file_uploader("Upload Crypto CSV", type=["csv"])
+    # --- DATA SOURCE SELECTOR ---
+    st.subheader("📂 Data Source")
+    uploaded_file = st.file_uploader("Upload Crypto CSV (Optional)", type=["csv"])
+    if uploaded_file is None and os.path.exists("crypto_Currency_data.csv"):
+        st.info("✅ Using local 'crypto_Currency_data.csv'")
     
     st.markdown("---")
     
@@ -215,62 +218,85 @@ with tab1:
     fig.update_traces(line_color='#0068C9')
     st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 2: REAL DATA (UPDATED FOR ASSIGNMENT) ---
+# --- TAB 2: REAL DATA ---
 with tab2:
     @st.cache_data
-    def load_data(file):
-        # STAGE 4: Data Preparation & Cleaning
-        if file is not None:
+    def load_data(uploaded_file):
+        df = None
+        
+        # PRIORITY 1: User uploaded a file
+        if uploaded_file is not None:
             try:
-                df = pd.read_csv(file)
-                # 1. Convert Timestamp
-                # Try finding a date column
-                date_col = [c for c in df.columns if 'date' in c.lower() or 'time' in c.lower() or 'snapped_at' in c.lower()]
-                if date_col:
-                    df[date_col[0]] = pd.to_datetime(df[date_col[0]])
-                    df.rename(columns={date_col[0]: 'Timestamp'}, inplace=True)
+                df = pd.read_csv(uploaded_file)
+            except Exception as e:
+                st.error(f"Error reading uploaded file: {e}")
+        
+        # PRIORITY 2: Auto-load local file from GitHub Repo
+        elif os.path.exists("crypto_Currency_data.csv"):
+            try:
+                df = pd.read_csv("crypto_Currency_data.csv")
+            except Exception as e:
+                st.error(f"Error reading local file: {e}")
+        
+        # If we have data, clean and format it
+        if df is not None:
+            try:
+                # 1. Clean Timestamp (Unix or Standard)
+                if 'Timestamp' in df.columns:
+                    # Check if timestamp looks like a unix float (e.g. 1325412060.0)
+                    if df['Timestamp'].dtype == 'float64' or df['Timestamp'].dtype == 'int64':
+                        df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='s')
+                    else:
+                        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
                 else:
-                    # Fallback if no date column found, generate dummy index
-                    df['Timestamp'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
+                    # Try finding other date columns
+                    date_col = [c for c in df.columns if 'date' in c.lower()]
+                    if date_col:
+                        df['Timestamp'] = pd.to_datetime(df[date_col[0]])
+                    else:
+                        df['Timestamp'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
 
-                # 2. Rename Close to Price (Assignment Requirement)
-                # Find column resembling 'close' or 'price'
-                price_col = [c for c in df.columns if 'close' in c.lower() or 'price' in c.lower()]
-                if price_col:
-                    df.rename(columns={price_col[0]: 'Price'}, inplace=True)
+                # 2. Rename Close to Price
+                if 'Close' in df.columns:
+                    df.rename(columns={'Close': 'Price'}, inplace=True)
                 
-                # 3. Clean Missing Data
+                # 3. Ensure required columns exist
+                if 'Price' not in df.columns:
+                    st.error("Dataset missing 'Close' or 'Price' column.")
+                    return None
+                
+                if 'High' not in df.columns: df['High'] = df['Price']
+                if 'Low' not in df.columns: df['Low'] = df['Price']
+                if 'Volume' not in df.columns: df['Volume'] = 0
+                
+                # 4. Fill Missing Data
+                df.fillna(method='ffill', inplace=True)
                 df.dropna(inplace=True)
-                
-                # Ensure High/Low/Volume exist (for visualization)
-                if 'High' not in df.columns: df['High'] = df['Price'] * 1.02
-                if 'Low' not in df.columns: df['Low'] = df['Price'] * 0.98
-                if 'Volume' not in df.columns: df['Volume'] = np.random.randint(100, 1000, len(df))
                 
                 return df
             except Exception as e:
-                st.error(f"Error loading file: {e}")
+                st.error(f"Data processing error: {e}")
                 return None
-        else:
-            # FALLBACK GENERATOR (Includes High/Low/Volume now)
-            dates = pd.date_range(end=datetime.now(), periods=1000, freq="h")
-            base_price = 40000 + np.cumsum(np.random.randn(1000)) * 100
-            
-            df = pd.DataFrame({
-                'Timestamp': dates,
-                'Price': base_price,
-                'High': base_price + np.random.rand(1000) * 50,
-                'Low': base_price - np.random.rand(1000) * 50,
-                'Volume': np.random.randint(100, 1000, 1000)
-            })
-            return df
+        
+        # PRIORITY 3: Fallback Generator (If no file found)
+        st.warning("No data found. Using generated simulation.")
+        dates = pd.date_range(end=datetime.now(), periods=1000, freq="h")
+        base_price = 40000 + np.cumsum(np.random.randn(1000)) * 100
+        
+        return pd.DataFrame({
+            'Timestamp': dates,
+            'Price': base_price,
+            'High': base_price + 50,
+            'Low': base_price - 50,
+            'Volume': np.random.randint(100, 1000, 1000)
+        })
 
     real_df = load_data(uploaded_file)
     
     if real_df is not None:
         strategy_df = generate_signals(real_df.copy(), fast_window, slow_window)
         
-        # STAGE 6: Key Metrics Calculation
+        # METRICS
         daily_volatility = strategy_df['Price'].pct_change().std() * 100
         avg_drift = strategy_df['Price'].pct_change().mean() * 100
         
@@ -283,7 +309,7 @@ with tab2:
         c3.metric("Volatility Index", f"{daily_volatility:.2f}%")
         c4.metric("Avg Drift", f"{avg_drift:.4f}%")
 
-        # --- GRAPH 1: PRICE & SIGNALS (Line Graph) ---
+        # --- GRAPH 1: PRICE & SIGNALS ---
         st.subheader("1. Price Overview & Signals")
         fig_strat = go.Figure()
         fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Price'], name="Price", line=dict(color='gray', width=1, dash='dot')))
@@ -300,8 +326,8 @@ with tab2:
                                 yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
         st.plotly_chart(fig_strat, use_container_width=True)
 
-        # --- GRAPH 2: HIGH vs LOW (New Requirement) ---
-        st.subheader("2. High vs Low Analysis (Daily Volatility)")
+        # --- GRAPH 2: HIGH vs LOW ---
+        st.subheader("2. High vs Low Analysis")
         fig_hl = go.Figure()
         fig_hl.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['High'], name="High", line=dict(color='#00FF00', width=1)))
         fig_hl.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Low'], name="Low", line=dict(color='#FF0000', width=1)))
@@ -312,7 +338,7 @@ with tab2:
                                 yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
         st.plotly_chart(fig_hl, use_container_width=True)
 
-        # --- GRAPH 3: VOLUME ANALYSIS (New Requirement) ---
+        # --- GRAPH 3: VOLUME ANALYSIS ---
         st.subheader("3. Volume Analysis")
         fig_vol = go.Figure()
         fig_vol.add_trace(go.Bar(x=strategy_df['Timestamp'], y=strategy_df['Volume'], name="Volume", marker_color='#AB63FA'))
@@ -322,7 +348,7 @@ with tab2:
                                 yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
         st.plotly_chart(fig_vol, use_container_width=True)
 
-        # --- GRAPH 4: STRATEGY EQUITY CURVE ---
+        # --- GRAPH 4: EQUITY CURVE ---
         st.subheader("4. Strategy vs. Buy & Hold")
         fig_perf = go.Figure()
         fig_perf.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Cum_Strat'], name="Strategy Return", line=dict(color='#00FF00', width=2), fill='tozeroy', fillcolor='rgba(0,255,0,0.1)'))
