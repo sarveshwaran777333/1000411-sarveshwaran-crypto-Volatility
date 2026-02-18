@@ -20,6 +20,8 @@ st.set_page_config(
 # 2. SESSION STATE & THEME LOGIC
 if 'bg_color' not in st.session_state:
     st.session_state.bg_color = '#FFFFFF'
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 def get_theme_colors(hex_color):
     """Calculates text color AND sidebar color based on main background"""
@@ -30,11 +32,9 @@ def get_theme_colors(hex_color):
     # 1. Determine Text Color
     if luminance > 160:
         text_color = '#000000'
-        # If text is black, make expander headers slightly light (Glassy White)
         expander_bg = 'rgba(255, 255, 255, 0.4)'
     else:
         text_color = '#FFFFFF'
-        # If text is white, make expander headers slightly dark (Glassy Black)
         expander_bg = 'rgba(0, 0, 0, 0.4)'
     
     # 2. Determine Sidebar Color
@@ -50,7 +50,7 @@ def get_theme_colors(hex_color):
 text_color, sidebar_bg, expander_header_bg = get_theme_colors(st.session_state.bg_color)
 grid_color = text_color 
 
-# 3. ROBUST CSS INJECTION (FIXED FOR EXPANDERS)
+# 3. ROBUST CSS INJECTION
 st.markdown(
     f"""
     <style>
@@ -76,33 +76,23 @@ st.markdown(
     }}
     
     /* --- EXPANDER FIX (FROSTED GLASS LOOK) --- */
-    
-    /* 1. Force a specific background color for the header bar */
     .streamlit-expanderHeader {{
         background-color: {expander_header_bg} !important;
         border-radius: 5px;
         color: {text_color} !important;
     }}
-    
-    /* 2. Ensure Text inside header matches global text color */
     .streamlit-expanderHeader p, .streamlit-expanderHeader span {{
         color: {text_color} !important;
     }}
-    
-    /* 3. Ensure Arrow Icon matches global text color */
     .streamlit-expanderHeader svg {{
         fill: {text_color} !important;
     }}
-    
-    /* 4. Fix Hover State - slightly darken/lighten the frosted effect */
     .streamlit-expanderHeader:hover {{
         filter: brightness(1.1);
         color: {text_color} !important;
     }}
     
-    /* --- END FIX --- */
-    
-    /* Dropdown Menu Items (Always black for readability on white dropdown bg) */
+    /* Dropdown Menu Items (Always black for readability) */
     ul[data-testid="stSelectboxVirtualDropdown"] li {{
         color: black !important;
     }}
@@ -115,20 +105,15 @@ st.markdown(
 with st.sidebar:
     st.title("🎛️ Control Panel")
     
-    # --- GEMINI API KEY (SECRETS HANDLING) ---
-    with st.expander("🤖 AI Settings", expanded=True):
-        if "GEMINI_API_KEY" in st.secrets:
-            st.success("AI Key Loaded from Secrets! 🔒")
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            api_key_configured = True
-        else:
-            api_key_input = st.text_input("Gemini API Key", type="password", help="Key not found in secrets.")
-            if api_key_input:
-                genai.configure(api_key=api_key_input)
-                st.success("AI Connected! ✅")
-                api_key_configured = True
-            else:
-                api_key_configured = False
+    # --- GEMINI API KEY (AUTO LOAD) ---
+    # Removed the manual input box as requested
+    if "GEMINI_API_KEY" in st.secrets:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        api_key_configured = True
+        st.success("AI Active & Ready! 🤖")
+    else:
+        api_key_configured = False
+        st.error("⚠️ API Key missing in Secrets!")
     
     st.markdown("---")
     
@@ -152,7 +137,7 @@ with st.sidebar:
 
 # 5. APP LOGIC
 st.title("💰 Crypto Volatility Visualizer")
-st.markdown("Merged Framework: **Market Simulator** | **Live Strategy Backtester** | **Stochastic Forecasting** | **Voice AI Assistant**")
+st.markdown("Merged Framework: **Market Simulator** | **Live Strategy Backtester** | **Stochastic Forecasting** | **AI Chat**")
 
 def simulate_gbm(mu, sigma, days, start_price=1000):
     dt = 1/365
@@ -167,29 +152,40 @@ def generate_signals(df, fast, slow):
     return df
 
 # Helper to get AI Response
-def ask_gemini(question, context=""):
+def ask_gemini_chat(chat_history, context=""):
     if not api_key_configured:
-        return "⚠️ API Key missing. Please add it to Streamlit Secrets or sidebar."
+        return "⚠️ API Key missing. Please check your secrets."
     
     try:
         model = genai.GenerativeModel('gemini-pro')
-        prompt = f"""
-        You are an expert Crypto Quantitative Analyst acting as an assistant in a dashboard app.
         
-        Context about the user's current view:
+        # Construct a friendly system prompt
+        system_prompt = f"""
+        You are "Nexus", a friendly and enthusiastic Crypto AI Assistant.
+        You are chatting with a user who is looking at a financial dashboard.
+        
+        CURRENT DASHBOARD CONTEXT:
         {context}
         
-        User Question: {question}
-        
-        Answer concisely and professionally. Use bolding for key terms.
+        GUIDELINES:
+        - Be conversational, encouraging, and clear.
+        - Use emojis 🚀📈 to make it fun.
+        - Keep answers concise but helpful.
+        - If the user asks about the data, use the context provided above.
         """
-        response = model.generate_content(prompt)
+        
+        # Combine history for context (simplified)
+        full_prompt = system_prompt + "\n\n"
+        for msg in chat_history[-5:]: # Keep last 5 messages for context
+             full_prompt += f"{msg['role'].upper()}: {msg['content']}\n"
+             
+        response = model.generate_content(full_prompt)
         return response.text
     except Exception as e:
         return f"Error: {str(e)}"
 
 # TABS
-tab1, tab2, tab3, tab4 = st.tabs(["🌊 Pattern Lab", "🧠 Strategy Backtester", "🔮 Monte Carlo Forecast", "💬 Voice AI Assistant"])
+tab1, tab2, tab3, tab4 = st.tabs(["🌊 Pattern Lab", "🧠 Strategy Backtester", "🔮 Monte Carlo Forecast", "💬 AI Chat"])
 
 # --- TAB 1: PATTERN LAB ---
 with tab1:
@@ -258,11 +254,11 @@ with tab3:
                          yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
     st.plotly_chart(fig_mc, use_container_width=True)
 
-# --- TAB 4: VOICE AI ASSISTANT ---
+# --- TAB 4: CHAT INTERFACE ---
 with tab4:
-    st.subheader("💬 Voice & Text Assistant")
+    st.subheader("💬 Chat with Nexus AI")
     
-    # 1. Prepare Context
+    # 1. Prepare Live Context
     context_data = f"""
     Current Market Price: ${curr_price:.2f}
     Current Signal: {signal_status}
@@ -271,38 +267,23 @@ with tab4:
     Forecasted Volatility: {volatility}
     """
 
-    col_mic, col_text = st.columns([1, 4])
-    
-    # 2. Voice Input
-    with col_mic:
-        st.write("🎤 **Tap to Speak:**")
-        voice_text = speech_to_text(language='en', start_prompt="Start Recording", stop_prompt="Stop Recording", just_once=True, key='STT')
+    # 2. Display Chat History
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    # 3. Logic: Decide Source
-    final_query = None
-    
-    with col_text:
-        initial_text = voice_text if voice_text else ""
-        text_input = st.text_input("Or type your question here:", value=initial_text)
-        
-        if st.button("Ask Gemini"):
-            final_query = text_input
-        elif voice_text:
-            final_query = voice_text
+    # 3. Chat Input
+    if prompt := st.chat_input("Ask me about the market..."):
+        # Add user message to state
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    # 4. Process Request
-    if final_query:
-        with st.spinner("🤖 Analyzing Market Data..."):
-            response_text = ask_gemini(final_query, context=context_data)
-            
-            st.markdown(f"**🤖 Gemini:** {response_text}")
-            
-            # 5. Generate Audio
-            if "Error" not in response_text and "API Key missing" not in response_text:
-                try:
-                    tts = gTTS(text=response_text, lang='en')
-                    audio_bytes = BytesIO()
-                    tts.write_to_fp(audio_bytes)
-                    st.audio(audio_bytes, format='audio/mp3', start_time=0)
-                except Exception as e:
-                    st.warning(f"Audio playback failed: {e}")
+        # Generate AI Response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response_text = ask_gemini_chat(st.session_state.messages, context=context_data)
+                st.markdown(response_text)
+                
+        # Add assistant message to state
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
