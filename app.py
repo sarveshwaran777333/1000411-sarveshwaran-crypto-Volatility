@@ -27,11 +27,17 @@ def get_theme_colors(hex_color):
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b)
     
-    # ADJUSTED THRESHOLD: Switch to white text sooner (160)
-    # This prevents dark text on medium-dark backgrounds
-    text_color = '#000000' if luminance > 160 else '#FFFFFF'
+    # 1. Determine Text Color
+    if luminance > 160:
+        text_color = '#000000'
+        # If text is black, make expander headers slightly light (Glassy White)
+        expander_bg = 'rgba(255, 255, 255, 0.4)'
+    else:
+        text_color = '#FFFFFF'
+        # If text is white, make expander headers slightly dark (Glassy Black)
+        expander_bg = 'rgba(0, 0, 0, 0.4)'
     
-    # Determine Sidebar Color
+    # 2. Determine Sidebar Color
     if luminance > 160:
         sb_r, sb_g, sb_b = max(0, r-15), max(0, g-15), max(0, b-15)
     else:
@@ -39,12 +45,12 @@ def get_theme_colors(hex_color):
     
     sidebar_color = f"#{sb_r:02x}{sb_g:02x}{sb_b:02x}"
     
-    return text_color, sidebar_color
+    return text_color, sidebar_color, expander_bg
 
-text_color, sidebar_bg = get_theme_colors(st.session_state.bg_color)
+text_color, sidebar_bg, expander_header_bg = get_theme_colors(st.session_state.bg_color)
 grid_color = text_color 
 
-# 3. ROBUST CSS INJECTION (FIXED FOR VISIBILITY)
+# 3. ROBUST CSS INJECTION (FIXED FOR EXPANDERS)
 st.markdown(
     f"""
     <style>
@@ -69,27 +75,28 @@ st.markdown(
         -webkit-text-fill-color: {text_color} !important;
     }}
     
-    /* --- THE FIX FOR EXPANDERS (The "List Buttons") --- */
+    /* --- EXPANDER FIX (FROSTED GLASS LOOK) --- */
     
-    /* 1. Force the Header Background to be TRANSPARENT (matches sidebar) */
+    /* 1. Force a specific background color for the header bar */
     .streamlit-expanderHeader {{
-        background-color: transparent !important;
+        background-color: {expander_header_bg} !important;
+        border-radius: 5px;
         color: {text_color} !important;
     }}
     
-    /* 2. Force the Text inside the header to be the correct color */
+    /* 2. Ensure Text inside header matches global text color */
     .streamlit-expanderHeader p, .streamlit-expanderHeader span {{
         color: {text_color} !important;
     }}
     
-    /* 3. Force the Arrow Icon to be the correct color */
+    /* 3. Ensure Arrow Icon matches global text color */
     .streamlit-expanderHeader svg {{
         fill: {text_color} !important;
     }}
     
-    /* 4. Fix Hover State (prevent it from turning black) */
+    /* 4. Fix Hover State - slightly darken/lighten the frosted effect */
     .streamlit-expanderHeader:hover {{
-        background-color: rgba(128, 128, 128, 0.1) !important;
+        filter: brightness(1.1);
         color: {text_color} !important;
     }}
     
