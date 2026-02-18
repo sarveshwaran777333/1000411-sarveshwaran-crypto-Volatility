@@ -3,8 +3,13 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import os
+import google.generativeai as genai
 from datetime import datetime, timedelta
+
+# --- NEW IMPORTS FOR AUDIO ---
+from streamlit_mic_recorder import speech_to_text # For Voice Input
+from gtts import gTTS                             # For Audio Output
+from io import BytesIO                            # To handle audio files in memory
 
 # 1. PAGE CONFIG
 st.set_page_config(
@@ -24,10 +29,8 @@ def get_theme_colors(hex_color):
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b)
     
-    # Determine Text Color (Black or White)
     text_color = '#000000' if luminance > 128 else '#FFFFFF'
     
-    # Determine Sidebar Color (Adjust brightness slightly for contrast)
     if luminance > 128:
         sb_r, sb_g, sb_b = max(0, r-15), max(0, g-15), max(0, b-15)
     else:
@@ -37,7 +40,6 @@ def get_theme_colors(hex_color):
     
     return text_color, sidebar_color
 
-# Calculate colors immediately
 text_color, sidebar_bg = get_theme_colors(st.session_state.bg_color)
 grid_color = text_color 
 
@@ -45,33 +47,12 @@ grid_color = text_color
 st.markdown(
     f"""
     <style>
-    /* Main App Background */
-    .stApp {{
-        background-color: {st.session_state.bg_color};
-    }}
-    
-    /* Sidebar Background */
-    section[data-testid="stSidebar"] {{
-        background-color: {sidebar_bg};
-    }}
-    
-    /* Global Text Color */
-    h1, h2, h3, h4, h5, h6, p, li, span, div, label {{
-        color: {text_color} !important;
-    }}
-    
-    /* Fix Input Widgets Text (Sliders, Inputs) */
-    .stSelectbox, .stSlider, .stNumberInput, .stDateInput {{
-        color: {text_color} !important;
-    }}
-    div[data-testid="stMarkdownContainer"] p {{
-        color: {text_color} !important;
-    }}
-    
-    /* Metric styling */
-    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
-        color: {text_color} !important;
-    }}
+    .stApp {{ background-color: {st.session_state.bg_color}; }}
+    section[data-testid="stSidebar"] {{ background-color: {sidebar_bg}; }}
+    h1, h2, h3, h4, h5, h6, p, li, span, div, label {{ color: {text_color} !important; }}
+    .stSelectbox, .stSlider, .stNumberInput, .stDateInput, .stTextInput, .stTextArea {{ color: {text_color} !important; }}
+    div[data-testid="stMarkdownContainer"] p {{ color: {text_color} !important; }}
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{ color: {text_color} !important; }}
     </style>
     """,
     unsafe_allow_html=True
@@ -81,12 +62,18 @@ st.markdown(
 with st.sidebar:
     st.title("🎛️ Control Panel")
     
-    with st.expander("🎨 Appearance", expanded=True):
-        st.color_picker("Background Color", key="bg_color")
-        st.caption("Sidebar auto-adjusts to match.")
-        
+    # --- GEMINI API KEY INPUT ---
+    with st.expander("🤖 AI Settings", expanded=True):
+        api_key = st.text_input("Gemini API Key", type="password", help="Get key from aistudio.google.com")
+        if api_key:
+            genai.configure(api_key=api_key)
+            st.success("AI Connected! ✅")
+    
     st.markdown("---")
-
+    
+    with st.expander("🎨 Appearance", expanded=False):
+        st.color_picker("Background Color", key="bg_color")
+        
     with st.expander("🌊 Pattern Lab", expanded=False):
         pattern_type = st.selectbox("Wave Type", ("Sine Wave", "Cosine Wave", "Random Noise"))
         amplitude = st.slider("Amplitude", 10, 200, 50)
@@ -104,7 +91,7 @@ with st.sidebar:
 
 # 5. APP LOGIC
 st.title("💰 Crypto Volatility Visualizer")
-st.markdown("Merged Framework: **Market Simulator** | **Live Strategy Backtester** | **Stochastic Forecasting**")
+st.markdown("Merged Framework: **Market Simulator** | **Live Strategy Backtester** | **Stochastic Forecasting** | **Voice AI Assistant**")
 
 def simulate_gbm(mu, sigma, days, start_price=1000):
     dt = 1/365
@@ -118,8 +105,30 @@ def generate_signals(df, fast, slow):
     df['Entry_Exit'] = df['Signal'].diff()
     return df
 
+# Helper to get AI Response
+def ask_gemini(question, context=""):
+    try:
+        if not api_key:
+            return "⚠️ Please enter your Gemini API Key in the sidebar first."
+        
+        model = genai.GenerativeModel('gemini-pro')
+        prompt = f"""
+        You are an expert Crypto Quantitative Analyst acting as an assistant in a dashboard app.
+        
+        Context about the user's current view:
+        {context}
+        
+        User Question: {question}
+        
+        Answer concisely and professionally. Use bolding for key terms.
+        """
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 # TABS
-tab1, tab2, tab3 = st.tabs(["🌊 Pattern Lab", "🧠 Strategy Backtester", "🔮 Monte Carlo Forecast"])
+tab1, tab2, tab3, tab4 = st.tabs(["🌊 Pattern Lab", "🧠 Strategy Backtester", "🔮 Monte Carlo Forecast", "💬 Voice AI Assistant"])
 
 # --- TAB 1: PATTERN LAB ---
 with tab1:
@@ -134,13 +143,9 @@ with tab1:
     final_price = 1000 + base + (drift * t) + np.random.normal(0, amplitude * 0.2, len(t))
     
     fig = px.line(x=t, y=final_price, title=f"Generated {pattern_type}")
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', 
-        plot_bgcolor='rgba(0,0,0,0)', 
-        font=dict(color=text_color),
-        xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
-        yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color))
-    )
+    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color=text_color),
+                      xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                      yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
     fig.update_traces(line_color='#0068C9')
     st.plotly_chart(fig, use_container_width=True)
 
@@ -173,13 +178,9 @@ with tab2:
     fig_strat.add_trace(go.Scatter(x=buys['Timestamp'], y=buys['Price'], mode='markers', name='Buy', marker=dict(symbol='triangle-up', size=15, color='#00FF00')))
     fig_strat.add_trace(go.Scatter(x=sells['Timestamp'], y=sells['Price'], mode='markers', name='Sell', marker=dict(symbol='triangle-down', size=15, color='#FF0000')))
 
-    fig_strat.update_layout(
-        title="Technical Analysis", hovermode="x unified", height=600,
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=text_color), 
-        xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
-        yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color))
-    )
+    fig_strat.update_layout(title="Technical Analysis", hovermode="x unified", height=600, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                            font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                            yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
     st.plotly_chart(fig_strat, use_container_width=True)
 
 # --- TAB 3: FORECAST ---
@@ -191,10 +192,60 @@ with tab3:
     fig_mc = go.Figure()
     fig_mc.add_trace(go.Scatter(x=sim_dates, y=sim_prices, name="Projected Path", line=dict(color='#AB63FA')))
     
-    fig_mc.update_layout(
-        title=f"Projected {time_steps} Day Path", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=text_color), 
-        xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
-        yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color))
-    )
+    fig_mc.update_layout(title=f"Projected {time_steps} Day Path", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                         font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                         yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
     st.plotly_chart(fig_mc, use_container_width=True)
+
+# --- TAB 4: AI ASSISTANT (UPDATED WITH VOICE) ---
+with tab4:
+    st.subheader("💬 Voice & Text Assistant")
+    
+    # 1. Prepare Context
+    context_data = f"""
+    Current Market Price: ${curr_price:.2f}
+    Current Signal: {signal_status}
+    Fast MA Setting: {fast_window}
+    Slow MA Setting: {slow_window}
+    Forecasted Volatility: {volatility}
+    """
+
+    col_mic, col_text = st.columns([1, 4])
+    
+    # 2. Voice Input (Mic Recorder)
+    with col_mic:
+        st.write("🎤 **Tap to Speak:**")
+        # Returns the transcribed text from the browser's Speech-to-Text
+        voice_text = speech_to_text(language='en', start_prompt="Start Recording", stop_prompt="Stop Recording", just_once=True, key='STT')
+
+    # 3. Logic: Decide Source (Voice vs Text)
+    final_query = None
+    
+    with col_text:
+        # If voice was just used, pre-fill the text box
+        initial_text = voice_text if voice_text else ""
+        text_input = st.text_input("Or type your question here:", value=initial_text)
+        
+        if st.button("Ask Gemini"):
+            final_query = text_input
+        elif voice_text:
+            # Auto-submit if voice is detected
+            final_query = voice_text
+
+    # 4. Process Request
+    if final_query:
+        with st.spinner("🤖 Analyzing Market Data..."):
+            response_text = ask_gemini(final_query, context=context_data)
+            
+            # Display Text Response
+            st.markdown(f"**🤖 Gemini:** {response_text}")
+            
+            # 5. Generate Audio Response (Text-to-Speech)
+            if "Error" not in response_text:
+                try:
+                    tts = gTTS(text=response_text, lang='en')
+                    audio_bytes = BytesIO()
+                    tts.write_to_fp(audio_bytes)
+                    st.audio(audio_bytes, format='audio/mp3', start_time=0)
+                except Exception as e:
+                    st.warning("Audio playback failed (Text-to-Speech service error).")
