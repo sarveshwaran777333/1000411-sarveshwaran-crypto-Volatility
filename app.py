@@ -64,7 +64,6 @@ with st.sidebar:
     with st.expander("🤖 AI Settings", expanded=True):
         # 1. Try to load from Secrets
         if "GEMINI_API_KEY" in st.secrets:
-            st.success("AI Key Loaded from Secrets! 🔒")
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
             api_key_configured = True
         else:
