@@ -6,68 +6,65 @@ import plotly.graph_objects as go
 import os
 from datetime import datetime, timedelta
 
-# 1. PAGE CONFIG (Must be first)
+# 1. PAGE CONFIG
 st.set_page_config(
-    page_title="Nexus Quant Dashboard", 
+    page_title="Crypto Volatility Visualizer", 
     layout="wide",
-    page_icon="📈",
+    page_icon="💰",
     initial_sidebar_state="expanded"
 )
 
-# 2. SESSION STATE INITIALIZATION
+# 2. SESSION STATE & THEME LOGIC
 if 'bg_color' not in st.session_state:
     st.session_state.bg_color = '#FFFFFF'
 
-# 3. HELPER FUNCTION FOR TEXT COLOR
-def get_text_color(hex_color):
+def get_theme_colors(hex_color):
+    """Calculates text color AND sidebar color based on main background"""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b)
-    return '#000000' if luminance > 128 else '#FFFFFF'
-
-# 4. SIDEBAR (Define this BEFORE the CSS so the state updates first)
-with st.sidebar:
-    st.title("🎛️ Nexus Controls")
     
-    # --- INSTANT THEME PICKER ---
-    with st.expander("🎨 Appearance", expanded=True):
-        # We use key='bg_color' to auto-update the session state
-        st.color_picker("Background Color", key="bg_color")
-        
-    st.markdown("---")
+    # Determine Text Color (Black or White)
+    text_color = '#000000' if luminance > 128 else '#FFFFFF'
+    
+    # Determine Sidebar Color (Adjust brightness slightly for contrast)
+    if luminance > 128:
+        sb_r, sb_g, sb_b = max(0, r-15), max(0, g-15), max(0, b-15)
+    else:
+        sb_r, sb_g, sb_b = min(255, r+20), min(255, g+20), min(255, b+20)
+    
+    sidebar_color = f"#{sb_r:02x}{sb_g:02x}{sb_b:02x}"
+    
+    return text_color, sidebar_color
 
-    # Pattern Controls
-    with st.expander("🌊 Pattern Lab", expanded=False):
-        pattern_type = st.selectbox("Wave Type", ("Sine Wave", "Cosine Wave", "Random Noise"))
-        amplitude = st.slider("Amplitude", 10, 200, 50)
-        frequency = st.slider("Frequency", 1, 100, 10)
-        drift = st.slider("Trend Drift", -5, 5, 0)
-
-    # Strategy Controls
-    with st.expander("🧠 Strategy Params", expanded=True):
-        fast_window = st.slider("Fast MA", 5, 50, 10)
-        slow_window = st.slider("Slow MA", 20, 200, 50)
-
-    # Forecast Controls
-    with st.expander("🔮 Forecast Params", expanded=False):
-        volatility = st.slider("Exp. Volatility (σ)", 0.01, 0.50, 0.20)
-        expected_return = st.slider("Exp. Return (μ)", -0.50, 0.50, 0.10)
-        time_steps = st.number_input("Days to Forecast", value=365)
-
-# 5. APPLY CSS (After Sidebar runs, so we have the latest color)
-text_color = get_text_color(st.session_state.bg_color)
+# Calculate colors immediately
+text_color, sidebar_bg = get_theme_colors(st.session_state.bg_color)
 grid_color = text_color 
 
+# 3. ROBUST CSS INJECTION
 st.markdown(
     f"""
     <style>
-    /* Target the main app container */
+    /* Main App Background */
     .stApp {{
         background-color: {st.session_state.bg_color};
     }}
     
-    /* Force text colors */
+    /* Sidebar Background */
+    section[data-testid="stSidebar"] {{
+        background-color: {sidebar_bg};
+    }}
+    
+    /* Global Text Color */
     h1, h2, h3, h4, h5, h6, p, li, span, div, label {{
+        color: {text_color} !important;
+    }}
+    
+    /* Fix Input Widgets Text (Sliders, Inputs) */
+    .stSelectbox, .stSlider, .stNumberInput, .stDateInput {{
+        color: {text_color} !important;
+    }}
+    div[data-testid="stMarkdownContainer"] p {{
         color: {text_color} !important;
     }}
     
@@ -75,21 +72,40 @@ st.markdown(
     [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
         color: {text_color} !important;
     }}
-    
-    /* Input widgets text */
-    .stSelectbox, .stSlider, .stNumberInput {{
-        color: {text_color} !important;
-    }}
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# 6. APP LOGIC
-st.title("📈 Nexus Quant Dashboard")
+# 4. SIDEBAR CONTROLS
+with st.sidebar:
+    st.title("🎛️ Control Panel")
+    
+    with st.expander("🎨 Appearance", expanded=True):
+        st.color_picker("Background Color", key="bg_color")
+        st.caption("Sidebar auto-adjusts to match.")
+        
+    st.markdown("---")
+
+    with st.expander("🌊 Pattern Lab", expanded=False):
+        pattern_type = st.selectbox("Wave Type", ("Sine Wave", "Cosine Wave", "Random Noise"))
+        amplitude = st.slider("Amplitude", 10, 200, 50)
+        frequency = st.slider("Frequency", 1, 100, 10)
+        drift = st.slider("Trend Drift", -5, 5, 0)
+
+    with st.expander("🧠 Strategy Params", expanded=True):
+        fast_window = st.slider("Fast MA", 5, 50, 10)
+        slow_window = st.slider("Slow MA", 20, 200, 50)
+
+    with st.expander("🔮 Forecast Params", expanded=False):
+        volatility = st.slider("Exp. Volatility (σ)", 0.01, 0.50, 0.20)
+        expected_return = st.slider("Exp. Return (μ)", -0.50, 0.50, 0.10)
+        time_steps = st.number_input("Days to Forecast", value=365)
+
+# 5. APP LOGIC
+st.title("💰 Crypto Volatility Visualizer")
 st.markdown("Merged Framework: **Market Simulator** | **Live Strategy Backtester** | **Stochastic Forecasting**")
 
-# Define Data Helpers
 def simulate_gbm(mu, sigma, days, start_price=1000):
     dt = 1/365
     returns = np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * np.random.normal(0, 1, days))
@@ -118,16 +134,20 @@ with tab1:
     final_price = 1000 + base + (drift * t) + np.random.normal(0, amplitude * 0.2, len(t))
     
     fig = px.line(x=t, y=final_price, title=f"Generated {pattern_type}")
-    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
-                      font=dict(color=text_color), xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1))
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)', 
+        plot_bgcolor='rgba(0,0,0,0)', 
+        font=dict(color=text_color),
+        xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+        yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color))
+    )
     fig.update_traces(line_color='#0068C9')
     st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 2: REAL DATA + STRATEGY ---
+# --- TAB 2: REAL DATA ---
 with tab2:
     @st.cache_data
     def load_data():
-        # Fallback Generator to ensure it always works
         dates = pd.date_range(end=datetime.now(), periods=1000, freq="h")
         prices = 40000 + np.cumsum(np.random.randn(1000)) * 100
         return pd.DataFrame({'Timestamp': dates, 'Price': prices})
@@ -148,7 +168,6 @@ with tab2:
     fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Fast_MA'], name="Fast MA", line=dict(color='#00CFBE', width=2)))
     fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Slow_MA'], name="Slow MA", line=dict(color='#FF4B4B', width=2)))
     
-    # Buy/Sell Markers
     buys = strategy_df[strategy_df['Entry_Exit'] == 2]
     sells = strategy_df[strategy_df['Entry_Exit'] == -2]
     fig_strat.add_trace(go.Scatter(x=buys['Timestamp'], y=buys['Price'], mode='markers', name='Buy', marker=dict(symbol='triangle-up', size=15, color='#00FF00')))
@@ -157,7 +176,9 @@ with tab2:
     fig_strat.update_layout(
         title="Technical Analysis", hovermode="x unified", height=600,
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=text_color), xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1)
+        font=dict(color=text_color), 
+        xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+        yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color))
     )
     st.plotly_chart(fig_strat, use_container_width=True)
 
@@ -172,6 +193,8 @@ with tab3:
     
     fig_mc.update_layout(
         title=f"Projected {time_steps} Day Path", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color=text_color), xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1)
+        font=dict(color=text_color), 
+        xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+        yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color))
     )
     st.plotly_chart(fig_mc, use_container_width=True)
