@@ -5,9 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import google.generativeai as genai
 from datetime import datetime, timedelta
-from io import BytesIO
-from gtts import gTTS
-from streamlit_mic_recorder import speech_to_text
 
 # 1. PAGE CONFIG
 st.set_page_config(
@@ -105,8 +102,7 @@ st.markdown(
 with st.sidebar:
     st.title("🎛️ Control Panel")
     
-    # --- GEMINI API KEY (AUTO LOAD) ---
-    # Removed the manual input box as requested
+    # --- GEMINI API KEY ---
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         api_key_configured = True
@@ -114,6 +110,12 @@ with st.sidebar:
     else:
         api_key_configured = False
         st.error("⚠️ API Key missing in Secrets!")
+    
+    st.markdown("---")
+    
+    # --- STAGE 4: DATA PREPARATION (FILE UPLOADER) ---
+    st.subheader("📂 Assignment Data")
+    uploaded_file = st.file_uploader("Upload Crypto CSV", type=["csv"])
     
     st.markdown("---")
     
@@ -145,10 +147,20 @@ def simulate_gbm(mu, sigma, days, start_price=1000):
     return start_price * np.cumprod(returns)
 
 def generate_signals(df, fast, slow):
+    # 1. Moving Averages
     df['Fast_MA'] = df['Price'].rolling(window=fast).mean()
     df['Slow_MA'] = df['Price'].rolling(window=slow).mean()
     df['Signal'] = np.where(df['Fast_MA'] > df['Slow_MA'], 1, -1)
     df['Entry_Exit'] = df['Signal'].diff()
+    
+    # 2. Performance Calculation (Cumulative Returns)
+    df['Market_Ret'] = df['Price'].pct_change()
+    df['Strat_Ret'] = df['Market_Ret'] * df['Signal'].shift(1)
+    
+    df['Cum_Market'] = (1 + df['Market_Ret']).cumprod()
+    df['Cum_Strat'] = (1 + df['Strat_Ret']).cumprod()
+    df.fillna(1, inplace=True)
+    
     return df
 
 # Helper to get AI Response
@@ -159,7 +171,6 @@ def ask_gemini_chat(chat_history, context=""):
     try:
         model = genai.GenerativeModel('gemini-pro')
         
-        # Construct a friendly system prompt
         system_prompt = f"""
         You are "Nexus", a friendly and enthusiastic Crypto AI Assistant.
         You are chatting with a user who is looking at a financial dashboard.
@@ -171,12 +182,10 @@ def ask_gemini_chat(chat_history, context=""):
         - Be conversational, encouraging, and clear.
         - Use emojis 🚀📈 to make it fun.
         - Keep answers concise but helpful.
-        - If the user asks about the data, use the context provided above.
         """
         
-        # Combine history for context (simplified)
         full_prompt = system_prompt + "\n\n"
-        for msg in chat_history[-5:]: # Keep last 5 messages for context
+        for msg in chat_history[-5:]:
              full_prompt += f"{msg['role'].upper()}: {msg['content']}\n"
              
         response = model.generate_content(full_prompt)
@@ -185,7 +194,7 @@ def ask_gemini_chat(chat_history, context=""):
         return f"Error: {str(e)}"
 
 # TABS
-tab1, tab2, tab3, tab4 = st.tabs(["🌊 Pattern Lab", "🧠 Strategy Backtester", "🔮 Monte Carlo Forecast", "💬 AI Chat"])
+tab1, tab2, tab3, tab4 = st.tabs(["🌊 Pattern Lab", "🧠 Real Data & Analysis", "🔮 Monte Carlo Forecast", "💬 AI Chat"])
 
 # --- TAB 1: PATTERN LAB ---
 with tab1:
@@ -206,39 +215,123 @@ with tab1:
     fig.update_traces(line_color='#0068C9')
     st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 2: REAL DATA ---
+# --- TAB 2: REAL DATA (UPDATED FOR ASSIGNMENT) ---
 with tab2:
     @st.cache_data
-    def load_data():
-        dates = pd.date_range(end=datetime.now(), periods=1000, freq="h")
-        prices = 40000 + np.cumsum(np.random.randn(1000)) * 100
-        return pd.DataFrame({'Timestamp': dates, 'Price': prices})
+    def load_data(file):
+        # STAGE 4: Data Preparation & Cleaning
+        if file is not None:
+            try:
+                df = pd.read_csv(file)
+                # 1. Convert Timestamp
+                # Try finding a date column
+                date_col = [c for c in df.columns if 'date' in c.lower() or 'time' in c.lower() or 'snapped_at' in c.lower()]
+                if date_col:
+                    df[date_col[0]] = pd.to_datetime(df[date_col[0]])
+                    df.rename(columns={date_col[0]: 'Timestamp'}, inplace=True)
+                else:
+                    # Fallback if no date column found, generate dummy index
+                    df['Timestamp'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
 
-    real_df = load_data()
-    strategy_df = generate_signals(real_df.copy(), fast_window, slow_window)
-    
-    c1, c2, c3 = st.columns(3)
-    curr_price = strategy_df['Price'].iloc[-1]
-    signal_status = "BULLISH 🟢" if strategy_df['Signal'].iloc[-1] == 1 else "BEARISH 🔴"
-    
-    c1.metric("Current Price", f"${curr_price:,.2f}")
-    c2.metric("Signal Status", signal_status)
-    c3.metric("Active Strategy", f"MA Crossover ({fast_window}/{slow_window})")
+                # 2. Rename Close to Price (Assignment Requirement)
+                # Find column resembling 'close' or 'price'
+                price_col = [c for c in df.columns if 'close' in c.lower() or 'price' in c.lower()]
+                if price_col:
+                    df.rename(columns={price_col[0]: 'Price'}, inplace=True)
+                
+                # 3. Clean Missing Data
+                df.dropna(inplace=True)
+                
+                # Ensure High/Low/Volume exist (for visualization)
+                if 'High' not in df.columns: df['High'] = df['Price'] * 1.02
+                if 'Low' not in df.columns: df['Low'] = df['Price'] * 0.98
+                if 'Volume' not in df.columns: df['Volume'] = np.random.randint(100, 1000, len(df))
+                
+                return df
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+                return None
+        else:
+            # FALLBACK GENERATOR (Includes High/Low/Volume now)
+            dates = pd.date_range(end=datetime.now(), periods=1000, freq="h")
+            base_price = 40000 + np.cumsum(np.random.randn(1000)) * 100
+            
+            df = pd.DataFrame({
+                'Timestamp': dates,
+                'Price': base_price,
+                'High': base_price + np.random.rand(1000) * 50,
+                'Low': base_price - np.random.rand(1000) * 50,
+                'Volume': np.random.randint(100, 1000, 1000)
+            })
+            return df
 
-    fig_strat = go.Figure()
-    fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Price'], name="Price", line=dict(color='gray', width=1, dash='dot')))
-    fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Fast_MA'], name="Fast MA", line=dict(color='#00CFBE', width=2)))
-    fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Slow_MA'], name="Slow MA", line=dict(color='#FF4B4B', width=2)))
+    real_df = load_data(uploaded_file)
     
-    buys = strategy_df[strategy_df['Entry_Exit'] == 2]
-    sells = strategy_df[strategy_df['Entry_Exit'] == -2]
-    fig_strat.add_trace(go.Scatter(x=buys['Timestamp'], y=buys['Price'], mode='markers', name='Buy', marker=dict(symbol='triangle-up', size=15, color='#00FF00')))
-    fig_strat.add_trace(go.Scatter(x=sells['Timestamp'], y=sells['Price'], mode='markers', name='Sell', marker=dict(symbol='triangle-down', size=15, color='#FF0000')))
+    if real_df is not None:
+        strategy_df = generate_signals(real_df.copy(), fast_window, slow_window)
+        
+        # STAGE 6: Key Metrics Calculation
+        daily_volatility = strategy_df['Price'].pct_change().std() * 100
+        avg_drift = strategy_df['Price'].pct_change().mean() * 100
+        
+        c1, c2, c3, c4 = st.columns(4)
+        curr_price = strategy_df['Price'].iloc[-1]
+        signal_status = "BULLISH 🟢" if strategy_df['Signal'].iloc[-1] == 1 else "BEARISH 🔴"
+        
+        c1.metric("Current Price", f"${curr_price:,.2f}")
+        c2.metric("Signal Status", signal_status)
+        c3.metric("Volatility Index", f"{daily_volatility:.2f}%")
+        c4.metric("Avg Drift", f"{avg_drift:.4f}%")
 
-    fig_strat.update_layout(title="Technical Analysis", hovermode="x unified", height=600, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                            font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
-                            yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
-    st.plotly_chart(fig_strat, use_container_width=True)
+        # --- GRAPH 1: PRICE & SIGNALS (Line Graph) ---
+        st.subheader("1. Price Overview & Signals")
+        fig_strat = go.Figure()
+        fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Price'], name="Price", line=dict(color='gray', width=1, dash='dot')))
+        fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Fast_MA'], name="Fast MA", line=dict(color='#00CFBE', width=2)))
+        fig_strat.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Slow_MA'], name="Slow MA", line=dict(color='#FF4B4B', width=2)))
+        
+        buys = strategy_df[strategy_df['Entry_Exit'] == 2]
+        sells = strategy_df[strategy_df['Entry_Exit'] == -2]
+        fig_strat.add_trace(go.Scatter(x=buys['Timestamp'], y=buys['Price'], mode='markers', name='Buy', marker=dict(symbol='triangle-up', size=15, color='#00FF00')))
+        fig_strat.add_trace(go.Scatter(x=sells['Timestamp'], y=sells['Price'], mode='markers', name='Sell', marker=dict(symbol='triangle-down', size=15, color='#FF0000')))
+
+        fig_strat.update_layout(hovermode="x unified", height=500, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                                yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
+        st.plotly_chart(fig_strat, use_container_width=True)
+
+        # --- GRAPH 2: HIGH vs LOW (New Requirement) ---
+        st.subheader("2. High vs Low Analysis (Daily Volatility)")
+        fig_hl = go.Figure()
+        fig_hl.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['High'], name="High", line=dict(color='#00FF00', width=1)))
+        fig_hl.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Low'], name="Low", line=dict(color='#FF0000', width=1)))
+        fig_hl.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Price'], name="Close", line=dict(color='white', width=1, dash='dot')))
+        
+        fig_hl.update_layout(hovermode="x unified", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                                yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
+        st.plotly_chart(fig_hl, use_container_width=True)
+
+        # --- GRAPH 3: VOLUME ANALYSIS (New Requirement) ---
+        st.subheader("3. Volume Analysis")
+        fig_vol = go.Figure()
+        fig_vol.add_trace(go.Bar(x=strategy_df['Timestamp'], y=strategy_df['Volume'], name="Volume", marker_color='#AB63FA'))
+        
+        fig_vol.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                                yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
+        st.plotly_chart(fig_vol, use_container_width=True)
+
+        # --- GRAPH 4: STRATEGY EQUITY CURVE ---
+        st.subheader("4. Strategy vs. Buy & Hold")
+        fig_perf = go.Figure()
+        fig_perf.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Cum_Strat'], name="Strategy Return", line=dict(color='#00FF00', width=2), fill='tozeroy', fillcolor='rgba(0,255,0,0.1)'))
+        fig_perf.add_trace(go.Scatter(x=strategy_df['Timestamp'], y=strategy_df['Cum_Market'], name="Buy & Hold", line=dict(color='gray', width=2, dash='dot')))
+        
+        fig_perf.update_layout(hovermode="x unified", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                               font=dict(color=text_color), xaxis=dict(showgrid=False, title_font=dict(color=text_color), tickfont=dict(color=text_color)), 
+                               yaxis=dict(title="Growth Multiplier (1.0 = Breakeven)", showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
+        st.plotly_chart(fig_perf, use_container_width=True)
 
 # --- TAB 3: FORECAST ---
 with tab3:
