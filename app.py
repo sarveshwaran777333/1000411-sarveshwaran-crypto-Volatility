@@ -5,11 +5,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import google.generativeai as genai
 from datetime import datetime, timedelta
-
-# --- NEW IMPORTS FOR AUDIO ---
-from streamlit_mic_recorder import speech_to_text # For Voice Input
-from gtts import gTTS                             # For Audio Output
-from io import BytesIO                            # To handle audio files in memory
+from io import BytesIO
+from gtts import gTTS
+from streamlit_mic_recorder import speech_to_text
 
 # 1. PAGE CONFIG
 st.set_page_config(
@@ -62,12 +60,22 @@ st.markdown(
 with st.sidebar:
     st.title("🎛️ Control Panel")
     
-    # --- GEMINI API KEY INPUT ---
+    # --- GEMINI API KEY (SECRETS HANDLING) ---
     with st.expander("🤖 AI Settings", expanded=True):
-        api_key = st.text_input("Gemini API Key", type="password", help="Get key from aistudio.google.com")
-        if api_key:
-            genai.configure(api_key=api_key)
-            st.success("AI Connected! ✅")
+        # 1. Try to load from Secrets
+        if "GEMINI_API_KEY" in st.secrets:
+            st.success("AI Key Loaded from Secrets! 🔒")
+            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+            api_key_configured = True
+        else:
+            # 2. Fallback to Manual Input
+            api_key_input = st.text_input("Gemini API Key", type="password", help="Key not found in secrets.")
+            if api_key_input:
+                genai.configure(api_key=api_key_input)
+                st.success("AI Connected! ✅")
+                api_key_configured = True
+            else:
+                api_key_configured = False
     
     st.markdown("---")
     
@@ -107,10 +115,10 @@ def generate_signals(df, fast, slow):
 
 # Helper to get AI Response
 def ask_gemini(question, context=""):
+    if not api_key_configured:
+        return "⚠️ API Key missing. Please add it to Streamlit Secrets or sidebar."
+    
     try:
-        if not api_key:
-            return "⚠️ Please enter your Gemini API Key in the sidebar first."
-        
         model = genai.GenerativeModel('gemini-pro')
         prompt = f"""
         You are an expert Crypto Quantitative Analyst acting as an assistant in a dashboard app.
@@ -197,7 +205,7 @@ with tab3:
                          yaxis=dict(showgrid=True, gridcolor=grid_color, gridwidth=0.1, title_font=dict(color=text_color), tickfont=dict(color=text_color)))
     st.plotly_chart(fig_mc, use_container_width=True)
 
-# --- TAB 4: AI ASSISTANT (UPDATED WITH VOICE) ---
+# --- TAB 4: VOICE AI ASSISTANT ---
 with tab4:
     st.subheader("💬 Voice & Text Assistant")
     
@@ -212,24 +220,21 @@ with tab4:
 
     col_mic, col_text = st.columns([1, 4])
     
-    # 2. Voice Input (Mic Recorder)
+    # 2. Voice Input
     with col_mic:
         st.write("🎤 **Tap to Speak:**")
-        # Returns the transcribed text from the browser's Speech-to-Text
         voice_text = speech_to_text(language='en', start_prompt="Start Recording", stop_prompt="Stop Recording", just_once=True, key='STT')
 
-    # 3. Logic: Decide Source (Voice vs Text)
+    # 3. Logic: Decide Source
     final_query = None
     
     with col_text:
-        # If voice was just used, pre-fill the text box
         initial_text = voice_text if voice_text else ""
         text_input = st.text_input("Or type your question here:", value=initial_text)
         
         if st.button("Ask Gemini"):
             final_query = text_input
         elif voice_text:
-            # Auto-submit if voice is detected
             final_query = voice_text
 
     # 4. Process Request
@@ -237,11 +242,10 @@ with tab4:
         with st.spinner("🤖 Analyzing Market Data..."):
             response_text = ask_gemini(final_query, context=context_data)
             
-            # Display Text Response
             st.markdown(f"**🤖 Gemini:** {response_text}")
             
-            # 5. Generate Audio Response (Text-to-Speech)
-            if "Error" not in response_text:
+            # 5. Generate Audio
+            if "Error" not in response_text and "API Key missing" not in response_text:
                 try:
                     tts = gTTS(text=response_text, lang='en')
                     audio_bytes = BytesIO()
