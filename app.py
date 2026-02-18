@@ -114,13 +114,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # --- DATA SOURCE SELECTOR ---
-    st.subheader("📂 Data Source")
-    uploaded_file = st.file_uploader("Upload Crypto CSV (Optional)", type=["csv"])
-    if uploaded_file is None and os.path.exists("crypto_Currency_data.csv"):
-        st.info("✅ Using local 'crypto_Currency_data.csv'")
-    
-    st.markdown("---")
+    # NOTE: File Uploader Removed. App now auto-loads 'crypto_Currency_data.csv'
     
     with st.expander("🎨 Appearance", expanded=False):
         st.color_picker("Background Color", key="bg_color")
@@ -221,55 +215,48 @@ with tab1:
 # --- TAB 2: REAL DATA ---
 with tab2:
     @st.cache_data
-    def load_data(uploaded_file):
+    def load_data():
         df = None
         
-        # PRIORITY 1: User uploaded a file
-        if uploaded_file is not None:
-            try:
-                df = pd.read_csv(uploaded_file)
-            except Exception as e:
-                st.error(f"Error reading uploaded file: {e}")
-        
-        # PRIORITY 2: Auto-load local file from GitHub Repo
-        elif os.path.exists("crypto_Currency_data.csv"):
+        # 1. Try Loading Local File
+        if os.path.exists("crypto_Currency_data.csv"):
             try:
                 df = pd.read_csv("crypto_Currency_data.csv")
+                # st.toast("Dataset Loaded Successfully! 📂") # Optional user feedback
             except Exception as e:
                 st.error(f"Error reading local file: {e}")
         
-        # If we have data, clean and format it
+        # 2. If loaded, Process it
         if df is not None:
             try:
-                # 1. Clean Timestamp (Unix or Standard)
+                # Handle Timestamp
                 if 'Timestamp' in df.columns:
-                    # Check if timestamp looks like a unix float (e.g. 1325412060.0)
                     if df['Timestamp'].dtype == 'float64' or df['Timestamp'].dtype == 'int64':
                         df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='s')
                     else:
                         df['Timestamp'] = pd.to_datetime(df['Timestamp'])
                 else:
-                    # Try finding other date columns
                     date_col = [c for c in df.columns if 'date' in c.lower()]
                     if date_col:
                         df['Timestamp'] = pd.to_datetime(df[date_col[0]])
                     else:
                         df['Timestamp'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
 
-                # 2. Rename Close to Price
+                # Rename Close to Price
                 if 'Close' in df.columns:
                     df.rename(columns={'Close': 'Price'}, inplace=True)
                 
-                # 3. Ensure required columns exist
+                # Check for Price column
                 if 'Price' not in df.columns:
                     st.error("Dataset missing 'Close' or 'Price' column.")
                     return None
                 
+                # Ensure High/Low/Volume
                 if 'High' not in df.columns: df['High'] = df['Price']
                 if 'Low' not in df.columns: df['Low'] = df['Price']
                 if 'Volume' not in df.columns: df['Volume'] = 0
                 
-                # 4. Fill Missing Data
+                # Fill Missing
                 df.fillna(method='ffill', inplace=True)
                 df.dropna(inplace=True)
                 
@@ -278,8 +265,8 @@ with tab2:
                 st.error(f"Data processing error: {e}")
                 return None
         
-        # PRIORITY 3: Fallback Generator (If no file found)
-        st.warning("No data found. Using generated simulation.")
+        # 3. Fallback: Simulation (If no file exists)
+        st.warning("⚠️ 'crypto_Currency_data.csv' not found. Using simulation data.")
         dates = pd.date_range(end=datetime.now(), periods=1000, freq="h")
         base_price = 40000 + np.cumsum(np.random.randn(1000)) * 100
         
@@ -291,7 +278,7 @@ with tab2:
             'Volume': np.random.randint(100, 1000, 1000)
         })
 
-    real_df = load_data(uploaded_file)
+    real_df = load_data()
     
     if real_df is not None:
         strategy_df = generate_signals(real_df.copy(), fast_window, slow_window)
