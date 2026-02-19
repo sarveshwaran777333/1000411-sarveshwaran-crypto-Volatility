@@ -57,9 +57,9 @@ if df is None:
     st.error("❌ Data file `crypto_Currency_data.csv` not found.")
     st.info("Please upload the CSV to your GitHub folder.")
 else:
-    tab1 = st.tabs(["📈 Market Analytics"])
-
-    with tab1:
+    # FIXED: Access the first element of the list returned by st.tabs()
+    tabs = st.tabs(["📈 Market Analytics"])
+    with tabs[0]:
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("1. Price Trend")
@@ -87,5 +87,3 @@ else:
             fig4.add_trace(go.Scattergl(x=stable["Timestamp"], y=stable["Price"], mode='markers', name="Stable", marker=dict(color="blue", size=4)))
             fig4.add_trace(go.Scattergl(x=volat["Timestamp"], y=volat["Price"], mode='markers', name="Volatile", marker=dict(color="orange", size=4)))
             st.plotly_chart(fig4, use_container_width=True)
-
-    
