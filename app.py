@@ -31,7 +31,6 @@ with st.sidebar:
     fast_window = st.slider("Fast MA Period", 5, 50, 10)
     slow_window = st.slider("Slow MA Period", 20, 200, 50)
     st.markdown("---")
-    st.caption("Nexus AI v1.0 | Data-driven Analysis")
 
 # -------------------- DATA PROCESSING --------------------
 @st.cache_data
