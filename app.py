@@ -50,18 +50,36 @@ with st.sidebar:
 
 @st.cache_data
 def load_data():
-    if os.path.exists("crypto_Currency_data.csv"):
-        df = pd.read_csv("crypto_Currency_data.csv")
+    file_path = "crypto_Currency_data.csv"
+    
+    if os.path.exists(file_path):
+        try:
+            # DEBUG: See what the file looks like on the server
+            file_size = os.path.getsize(file_path)
+            
+            # If the file is very small (like < 500 bytes), it's likely an LFS pointer
+            if file_size < 500:
+                st.error(f"⚠️ Detected a Git LFS pointer (Size: {file_size} bytes) instead of the real data. Please re-upload the CSV normally.")
+                return None
+                
+            df = pd.read_csv(file_path)
+        except pd.errors.EmptyDataError:
+            st.error("❌ The CSV file is empty or formatted incorrectly.")
+            return None
+        except Exception as e:
+            st.error(f"❌ Error loading CSV: {e}")
+            return None
     else:
-        # Fallback simulated data
-        dates = pd.date_range(end=datetime.now(), periods=2000, freq="h")
-        base_price = 40000 + np.cumsum(np.random.randn(2000)) * 100
+        # If file is totally missing, use simulation
+        st.warning("📂 'crypto_Currency_data.csv' not found. Using simulation data.")
+        dates = pd.date_range(end=datetime.now(), periods=1500, freq="h")
+        base_price = 40000 + np.cumsum(np.random.randn(1500)) * 100
         df = pd.DataFrame({
             "Timestamp": dates,
             "Price": base_price,
             "High": base_price + 50,
             "Low": base_price - 50,
-            "Volume": np.random.randint(100, 1000, 2000)
+            "Volume": np.random.randint(100, 1000, 1500)
         })
 
     # ---- STANDARDIZE ----
@@ -69,6 +87,7 @@ def load_data():
         df.rename(columns={"Close": "Price"}, inplace=True)
 
     if "Timestamp" in df.columns:
+        # Handle Unix Timestamps (the format in your specific file)
         if df["Timestamp"].dtype in ['float64', 'int64']:
             df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit='s')
         else:
@@ -77,13 +96,10 @@ def load_data():
         df["Timestamp"] = pd.date_range(end=datetime.now(), periods=len(df))
 
     df.ffill(inplace=True)
-    df.dropna(inplace=True)
+    df.dropna(subset=['Price'], inplace=True) # Ensure we have prices
 
-    # 🚀 PERFORMANCE BOOST: Limit rows to keep WebGL charts fast
-    df = df.tail(1500).copy()
-
-    return df
-
+    # Keep only the last 1500 rows for high-speed charts
+    return df.tail(1500).copy()
 
 @st.cache_data
 def generate_signals(df, fast, slow):
