@@ -105,13 +105,13 @@ def get_nexus_response(user_input):
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nUser Question: {user_input}"
         
-        # Generate content using 2.5 Flash
+        # ✅ Use 'model.generate_content' with config as a simple dict
         response = model.generate_content(
             full_prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=500
-            )
+            config={
+                "temperature": 0.7,
+                "max_output_tokens": 500
+            }
         )
 
         # SAFE extraction for 2.5 Flash
