@@ -9,12 +9,11 @@ from datetime import datetime, timedelta
 # -------------------- 1. CONFIG & API SETUP --------------------
 st.set_page_config(page_title="Crypto Analyst Hub", layout="wide", page_icon="💰")
 
-# Check for the API Key (using the name from your farming app)
+# Load API key from Streamlit secrets
 api_key = st.secrets.get("GENAI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
 
 if api_key:
     genai.configure(api_key=api_key)
-    # Using 1.5-flash as it is highly stable for general API keys
     model = genai.GenerativeModel("models/gemini-2.5-flash")
     api_ready = True
 else:
@@ -43,14 +42,11 @@ with st.sidebar:
 def load_data():
     file_path = "crypto_Currency_data.csv"
     
-    # Try to load the real file first (Checks if it's not a tiny Git LFS pointer)
     if os.path.exists(file_path) and os.path.getsize(file_path) > 2000:
         try:
             df = pd.read_csv(file_path)
-            # Standardize
             if "Close" in df.columns: df.rename(columns={"Close": "Price"}, inplace=True)
             if "Timestamp" in df.columns:
-                # Handle Unix timestamps 
                 if df["Timestamp"].dtype != 'O':
                     df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit='s')
                 else:
@@ -58,12 +54,9 @@ def load_data():
             return df.tail(1000).copy()
         except Exception as e:
             st.warning(f"Failed to read CSV, using simulation. Error: {e}")
-            pass 
 
-    # FALLBACK: Mathematical Simulation (Satisfies Assignment Requirements)
-    st.toast("Using Math-Simulated Data", icon="🔢")
+    # FALLBACK: Math-simulated data
     t = np.linspace(0, 20, 1000)
-    # Math formula: Base + Sine Wave + Trend Drift + Random Noise
     base_price = 40000 + amp * np.sin(freq * 0.1 * t) + (drift_val * 50 * t)
     noise = np.random.normal(0, amp * 0.2, 1000)
     sim_price = base_price + noise
@@ -80,41 +73,37 @@ def load_data():
 
 df = load_data()
 
-# Calculate Moving Averages & Regimes
+# Moving averages & volatility regimes
 df['Fast_MA'] = df['Price'].rolling(fast_window).mean()
 df['Slow_MA'] = df['Price'].rolling(slow_window).mean()
-
 rets = df['Price'].pct_change()
 vol = rets.rolling(20).std()
 df['Regime'] = np.where(vol > vol.median(), 'Volatile', 'Stable')
 
+# -------------------- 5. AI CHAT FUNCTION --------------------
 def get_nexus_response(user_input):
     if not api_ready:
         return "❌ API key not configured properly in Streamlit Secrets."
 
     SYSTEM_PROMPT = """
-    You are Nexus, a crypto-only AI assistant.
-    Rules:
-    - Answer ONLY crypto, market, and dashboard questions.
-    - Use simple English.
-    - Maximum 5 lines.
-    - If question is not about crypto/markets, reply:
-    "I can help only with crypto and market analysis questions."
-    """
-
+You are Nexus, a crypto-only AI assistant.
+Rules:
+- Answer ONLY crypto, market, and dashboard questions.
+- Use simple English.
+- Maximum 5 lines.
+- If question is not about crypto/markets, reply:
+"I can help only with crypto and market analysis questions."
+"""
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nUser Question: {user_input}"
-        
-        # ✅ Use 'model.generate_content' with config as a simple dict
+        # Use simple dict for temperature & max_output_tokens
         response = model.generate_content(
             full_prompt,
-            config={
-                "temperature": 0.7,
-                "max_output_tokens": 500
-            }
+            temperature=0.7,
+            max_output_tokens=500
         )
 
-        # SAFE extraction for 2.5 Flash
+        # Safe extraction for 2.5 Flash
         if response:
             if hasattr(response, "text") and response.text:
                 return response.text.strip()
@@ -122,23 +111,20 @@ def get_nexus_response(user_input):
                 candidate = response.candidates[0]
                 if hasattr(candidate, "content") and candidate.content.parts:
                     return candidate.content.parts[0].text.strip()
-
         return "⚠️ AI returned empty content. Try again."
-
     except Exception as e:
         return f"⚠️ AI Error: {str(e)}"
-
 
 # -------------------- 6. DASHBOARD UI --------------------
 st.title("💰 Crypto Volatility & AI Analyst")
 
 tab1, tab2 = st.tabs(["📈 Market Analytics", "💬 AI Assistant"])
 
+# ----- Tab 1: Market Analytics -----
 with tab1:
     col1, col2 = st.columns(2)
     
     with col1:
-        # Chart 1: Price Trend & Moving Averages
         st.subheader("1. Price Trend & Moving Averages")
         fig1 = go.Figure()
         fig1.add_trace(go.Scattergl(x=df["Timestamp"], y=df["Price"], name="Price", line=dict(color="#00CFBE")))
@@ -146,21 +132,18 @@ with tab1:
         fig1.add_trace(go.Scattergl(x=df["Timestamp"], y=df["Slow_MA"], name=f"{slow_window} MA", line=dict(color="red")))
         st.plotly_chart(fig1, use_container_width=True)
 
-        # Chart 2: Volume Bar Chart
         st.subheader("2. Trading Volume")
         fig2 = go.Figure(go.Bar(x=df["Timestamp"], y=df["Volume"], marker_color="#AB63FA"))
         st.plotly_chart(fig2, use_container_width=True)
 
     with col2:
-        # Chart 3: High vs Low Spread
         st.subheader("3. Intra-day Volatility (High/Low)")
         fig3 = go.Figure()
         fig3.add_trace(go.Scattergl(x=df["Timestamp"], y=df["High"], name="High", line=dict(color="green")))
         fig3.add_trace(go.Scattergl(x=df["Timestamp"], y=df["Low"], name="Low", line=dict(color="red")))
         st.plotly_chart(fig3, use_container_width=True)
 
-        # Chart 4: Stable vs Volatile Regimes
-        st.subheader("4. Stability vs Volatility Regimes")
+        st.subheader("4. Stability vs Volatile Regimes")
         fig4 = go.Figure()
         stable = df[df['Regime'] == 'Stable']
         volat = df[df['Regime'] == 'Volatile']
@@ -168,7 +151,7 @@ with tab1:
         fig4.add_trace(go.Scattergl(x=volat["Timestamp"], y=volat["Price"], mode='markers', name="Volatile", marker=dict(color="orange", size=4)))
         st.plotly_chart(fig4, use_container_width=True)
 
-# -------------------- AI Chat in tab2 --------------------
+# ----- Tab 2: AI Chat -----
 with tab2:
     st.subheader("Chat with Nexus 🤖")
 
@@ -191,4 +174,5 @@ with tab2:
                 answer = get_nexus_response(prompt)
                 st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
+
 
