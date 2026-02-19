@@ -15,7 +15,7 @@ api_key = st.secrets.get("GENAI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
 if api_key:
     genai.configure(api_key=api_key)
     # Using 1.5-flash as it is highly stable for general API keys
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    model = genai.GenerativeModel("models/gemini-2.5-flash")
     api_ready = True
 else:
     api_ready = False
