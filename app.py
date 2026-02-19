@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # -------------------- 1. CONFIG & API SETUP --------------------
 st.set_page_config(page_title="Crypto Analyst Hub", layout="wide", page_icon="💰")
 
-# Load API key from Streamlit secrets
+# Check for the API Key
 api_key = st.secrets.get("GENAI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
 
 if api_key:
@@ -55,7 +55,8 @@ def load_data():
         except Exception as e:
             st.warning(f"Failed to read CSV, using simulation. Error: {e}")
 
-    # FALLBACK: Math-simulated data
+    # Fallback: Math simulation
+    st.toast("Using Math-Simulated Data", icon="🔢")
     t = np.linspace(0, 20, 1000)
     base_price = 40000 + amp * np.sin(freq * 0.1 * t) + (drift_val * 50 * t)
     noise = np.random.normal(0, amp * 0.2, 1000)
@@ -73,14 +74,15 @@ def load_data():
 
 df = load_data()
 
-# Moving averages & volatility regimes
+# Moving averages & regimes
 df['Fast_MA'] = df['Price'].rolling(fast_window).mean()
 df['Slow_MA'] = df['Price'].rolling(slow_window).mean()
+
 rets = df['Price'].pct_change()
 vol = rets.rolling(20).std()
 df['Regime'] = np.where(vol > vol.median(), 'Volatile', 'Stable')
 
-# -------------------- 5. AI CHAT FUNCTION --------------------
+# -------------------- 5. AI LOGIC --------------------
 def get_nexus_response(user_input):
     if not api_ready:
         return "❌ API key not configured properly in Streamlit Secrets."
@@ -96,14 +98,15 @@ Rules:
 """
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nUser Question: {user_input}"
-        # Use simple dict for temperature & max_output_tokens
-        response = model.generate_content(
-            full_prompt,
-            temperature=0.7,
-            max_output_tokens=500
-        )
+        
+        # ✅ Gemini 2.5 Flash proper call
+        response = model.generate_content({
+            "prompt": full_prompt,
+            "temperature": 0.7,
+            "max_output_tokens": 500
+        })
 
-        # Safe extraction for 2.5 Flash
+        # Extract the text safely
         if response:
             if hasattr(response, "text") and response.text:
                 return response.text.strip()
@@ -111,7 +114,9 @@ Rules:
                 candidate = response.candidates[0]
                 if hasattr(candidate, "content") and candidate.content.parts:
                     return candidate.content.parts[0].text.strip()
+
         return "⚠️ AI returned empty content. Try again."
+
     except Exception as e:
         return f"⚠️ AI Error: {str(e)}"
 
@@ -120,7 +125,7 @@ st.title("💰 Crypto Volatility & AI Analyst")
 
 tab1, tab2 = st.tabs(["📈 Market Analytics", "💬 AI Assistant"])
 
-# ----- Tab 1: Market Analytics -----
+# Tab 1: Charts
 with tab1:
     col1, col2 = st.columns(2)
     
@@ -143,7 +148,7 @@ with tab1:
         fig3.add_trace(go.Scattergl(x=df["Timestamp"], y=df["Low"], name="Low", line=dict(color="red")))
         st.plotly_chart(fig3, use_container_width=True)
 
-        st.subheader("4. Stability vs Volatile Regimes")
+        st.subheader("4. Stability vs Volatility Regimes")
         fig4 = go.Figure()
         stable = df[df['Regime'] == 'Stable']
         volat = df[df['Regime'] == 'Volatile']
@@ -151,7 +156,7 @@ with tab1:
         fig4.add_trace(go.Scattergl(x=volat["Timestamp"], y=volat["Price"], mode='markers', name="Volatile", marker=dict(color="orange", size=4)))
         st.plotly_chart(fig4, use_container_width=True)
 
-# ----- Tab 2: AI Chat -----
+# Tab 2: AI Chat
 with tab2:
     st.subheader("Chat with Nexus 🤖")
 
@@ -174,5 +179,3 @@ with tab2:
                 answer = get_nexus_response(prompt)
                 st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
-
-
