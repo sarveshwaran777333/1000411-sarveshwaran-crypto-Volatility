@@ -138,7 +138,7 @@ def ask_gemini(chat_history):
     if not api_key_configured:
         return "API Key missing."
 
-    model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+    model = genai.GenerativeModel("models/gemini-2.5-flash")
     prompt = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history[-5:]])
     response = model.generate_content(prompt)
     return response.text
