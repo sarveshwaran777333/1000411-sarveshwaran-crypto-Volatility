@@ -88,12 +88,10 @@ rets = df['Price'].pct_change()
 vol = rets.rolling(20).std()
 df['Regime'] = np.where(vol > vol.median(), 'Volatile', 'Stable')
 
-# -------------------- 5. AI LOGIC --------------------
 def get_nexus_response(user_input):
     if not api_ready:
         return "❌ API key not configured properly in Streamlit Secrets."
 
-    # Your Strict Persona Rules
     SYSTEM_PROMPT = """
     You are Nexus, a crypto-only AI assistant.
     Rules:
@@ -103,16 +101,33 @@ def get_nexus_response(user_input):
     - If question is not about crypto/markets, reply:
     "I can help only with crypto and market analysis questions."
     """
-    try:
-        full_message = f"{SYSTEM_PROMPT}\n\nUser Question: {user_input}"
-        response = model.generate_content(full_message)
 
-        # Safety Checks
-        if not response or not response.text:
-            return "⚠️ AI returned empty content."
-        return response.text.strip()
+    try:
+        full_prompt = f"{SYSTEM_PROMPT}\n\nUser Question: {user_input}"
+        
+        # Generate content using 2.5 Flash
+        response = model.generate_content(
+            full_prompt,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=500
+            )
+        )
+
+        # SAFE extraction for 2.5 Flash
+        if response:
+            if hasattr(response, "text") and response.text:
+                return response.text.strip()
+            elif hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and candidate.content.parts:
+                    return candidate.content.parts[0].text.strip()
+
+        return "⚠️ AI returned empty content. Try again."
+
     except Exception as e:
         return f"⚠️ AI Error: {str(e)}"
+
 
 # -------------------- 6. DASHBOARD UI --------------------
 st.title("💰 Crypto Volatility & AI Analyst")
@@ -153,16 +168,17 @@ with tab1:
         fig4.add_trace(go.Scattergl(x=volat["Timestamp"], y=volat["Price"], mode='markers', name="Volatile", marker=dict(color="orange", size=4)))
         st.plotly_chart(fig4, use_container_width=True)
 
+# -------------------- AI Chat in tab2 --------------------
 with tab2:
-    st.subheader("Chat with Nexus")
-    
+    st.subheader("Chat with Nexus 🤖")
+
     if not api_ready:
-        st.error("❌ API Key not found! Please add 'GENAI_API_KEY' to your Streamlit Secrets.")
-    
+        st.error("❌ API Key not found! Please add 'GENAI_API_KEY' or 'GEMINI_API_KEY' to your Streamlit Secrets.")
+
     # Display chat history
-    for m in st.session_state.messages:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
     # Chat input
     if prompt := st.chat_input("Ask me about crypto volatility..."):
@@ -175,3 +191,4 @@ with tab2:
                 answer = get_nexus_response(prompt)
                 st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
+
