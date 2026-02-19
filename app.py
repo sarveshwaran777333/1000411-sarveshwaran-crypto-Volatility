@@ -34,7 +34,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("🌊 Math Simulation Params")
-    st.info("Used to generate data if CSV is missing.")
     amp = st.slider("Amplitude (Swing)", 10, 500, 100)
     freq = st.slider("Frequency (Speed)", 1, 50, 10)
     drift_val = st.slider("Market Drift", -5.0, 5.0, 0.5)
